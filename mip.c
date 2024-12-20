@@ -15,7 +15,10 @@
 *       == [ STACK MEMORY INFORMATION FOR MIP ]
 * To avoid locking other memory, fill buffers up with enough data for a memory page. 4096. Use CHAR_MAX_BUFF_SIZE
 *
-* Note that even tho this is watching and comparing cached memory, app will only exit if memory has been modified.
+* Note that:
+* - Even tho this is watching and comparing cached memory, app will only exit if memory has been modified.
+* - Using UpdateMemory will keep the pointer address changing which can be a plus in certain cases
+*
 */
 #include <stdio.h>
 #include <string.h>
@@ -183,6 +186,9 @@ int main() {
     /* 
     * Why use MIP to update rather than updating manually? Once modified and lock, it will be watched.
     * If it was handled manually, It can be injected into your buffer and will not be catched once updated to MIP
+    * 
+    * PS: to keep a variable for read-only in-order to avoid indexing, Just do (char *BUFF = mip->Pointers[i]->Pointer;)
+    * this will keep updated even for new buffers
     */
     char *BUFF = (char *)malloc(1024);
     AddMemory(mip, NewPointer(HEAP_MEMORY, BUFF));
