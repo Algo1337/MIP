@@ -171,17 +171,27 @@ int main() {
 
     MIP *mip = InitMIP(NULL);
 
-    char *BUFF = (char *)malloc(1024);
-    AddMemory(mip, NewPointer(HEAP_MEMORY, BUFF));
-
-
-
     /* Since the library handles all memory, functions returning pointers can be passed directly using the NewPointer() function */
     /* Keep in mind: This is not good practice to use elsewhere unless you handle the memory wherever its being passed into ! */
     int add_chk = AddMemory(mip, NewPointer(HEAP_MEMORY, Test));
     if(!add_chk)
         printf("[ x ] Error, Unable to add to MIP's Memory Stack.....!");
 
+
+    /* Another Example Demostrating Memory Updating using MIP's function */
     
+    /* 
+    * Why use MIP to update rather than updating manually? Once modified and lock, it will be watched.
+    * If it was handled manually, It can be injected into your buffer and will not be catched once updated to MIP
+    */
+    char *BUFF = (char *)malloc(1024);
+    AddMemory(mip, NewPointer(HEAP_MEMORY, BUFF));
+    LockToggle(mip->Pointers[0]); // Lock The Memory
+
+    
+    LockToggle(mip->Pointers[0]); // Unlock The Memory
+    UpdateMemory(mip->Pointers[0], strdup("NIGGER_BOB")); // Current pointer will be free'd for new pointer
+    LockToggle(mip->Pointers[0]); // Relock Memory
+
     return 0;
 }
