@@ -24,6 +24,9 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <unistd.h>
+#include <stdint.h>
+#include <sys/mman.h>
 
 #define CHAR_MAX_BUFF_SIZE  4096
 
@@ -33,9 +36,9 @@ typedef enum Memory_T {
 } Memory_T;
 
 typedef struct Memory {
-    Memory_T    *Type;
+    Memory_T    Type;
     void        *Pointer;
-    void        *Memsz;
+    long        Memsz;
     void        *Copy;
     int         Locked;
 
@@ -48,7 +51,7 @@ typedef struct MIP {
 
     int         Debug;
 
-    void        (*Destruc) (struct MIP *m);
+    void        (*Destruct) (struct MIP *m);
 } MIP;
 
 int LockToggle(Memory *mem) { 
@@ -56,7 +59,7 @@ int LockToggle(Memory *mem) {
         return 0;
 
     void *aligned_ptr = (void *)((uintptr_t)mem->Pointer & ~(sysconf(_SC_PAGESIZE) - 1));
-    size_t aligned_size = mem->Memsz + ((uintptr_t)mem->Pointer - (uintptr_t)aligned_ptr);
+    size_t aligned_size = (size_t)(mem->Memsz + ((uintptr_t)mem->Pointer - (uintptr_t)aligned_ptr));
 
     /* Unlock memory */
     if(mem->Locked) {
@@ -71,7 +74,7 @@ int LockToggle(Memory *mem) {
 
     /* Lock memory */
     if(mlock(aligned_ptr, aligned_size) != 0 || mprotect(aligned_ptr, mem->Memsz, PROT_READ) != 0) {
-        (void)(mem->Base->Debug ? printf("[ x ] Unable to lock memory....!\n") : 0);
+        (void)(((MIP *)mem->Base)->Debug ? printf("[ x ] Unable to lock memory....!\n") : 0);
         return 0;
     }
     
@@ -79,18 +82,18 @@ int LockToggle(Memory *mem) {
     return mem->Locked;
 }
 
-Memory NewPointer(Memory_T *t, char *p, long sz) {
+Memory *NewPointer(Memory_T t, char *p, long sz) {
     Memory *new_mem = (Memory *)malloc(sizeof(Memory));
     *new_mem = (Memory){
         .Type        = t,
-        .Pointer     = (p ? p : (t == HEAP_MEMORY ? malloc(1)) : NULL),
-        .Memset      = sz
+        .Pointer     = (p ? p : ((int)t == (int)HEAP_MEMORY ? malloc(1) : NULL)),
+        .Memsz       = sz
     };
 
     if(t == STACK_MEMORY)
         printf("[ x ] Warning, MIP does not create stack variables for you, You must create it and assign the stack pointer....!\n");
 
-    mem->Copy = strdup(p);
+    new_mem->Copy = strdup(p);
     return new_mem;
 }
 
@@ -104,6 +107,10 @@ int UpdateMemory(Memory *mem, void *update, long new_sz) {
     LockToggle(mem);
     mem->Pointer = update;
     mem->Copy = strdup(update);
+
+    if(new_sz != 0)
+        mem->Memsz = new_sz;
+
     LockToggle(mem);
     return 1;
 }
@@ -116,7 +123,7 @@ int AddMemory(MIP *m, Memory *new_mem) {
     new_mem->Base = m;
 
     m->Pointers[m->PointerCount] = (Memory *)malloc(sizeof(Memory));
-    *m->Pointers[m->PointerCount] = new_mem;
+    m->Pointers[m->PointerCount] = new_mem;
     m->PointerCount++;
     m->Pointers = (Memory **)realloc(m->Pointers, sizeof(Memory *) * (m->PointerCount + 1));
 
@@ -147,10 +154,10 @@ int RemoveMemory(MIP *m, Memory *mem) {
 
 void WatchMemories(MIP *m) {
     if(!m)
-        return 0;
+        return;
 
     if(m->PointerCount < 1)
-        return 0;
+        return;
 
     while(m->PointerCount != 0) {
         int i = 0;
@@ -169,7 +176,18 @@ void WatchMemories(MIP *m) {
             }
             i++;
         }
-        (void *)(m->Debug ? printf("[ - ] Watching %ld memory blocks.....!\n", m->PointerCount) : 0);
+        (void)(m->Debug ? printf("[ - ] Watching %ld memory blocks.....!\n", m->PointerCount) : 0);
+    }
+}
+
+
+void DestructMIP(MIP *m) {
+    for(int i = 0; i < m->PointerCount; i++) {
+        if(m->Pointers[i])
+            break;
+
+        free(m->Pointers[i]);
+        m->Pointers[i] = NULL;
     }
 }
 
@@ -182,7 +200,7 @@ MIP *InitMIP(Memory **globals) {
     };
 
     if(globals) {
-        (void)(m->Debug ? printf("[ x ] Adding global variables....!\n") : 0);
+        (void)(mip->Debug ? printf("[ x ] Adding global variables....!\n") : 0);
         for(int i = 0; globals[i] != NULL; i++) {
             if(globals[i])
                 break;
@@ -190,35 +208,25 @@ MIP *InitMIP(Memory **globals) {
             AddMemory(mip, globals[i]);
         }
     } else { 
-        (void)(m->Debug ? printf("[ x ] No global variables provided....!\n") : 0);
+        (void)(mip->Debug ? printf("[ x ] No global variables provided....!\n") : 0);
     }
 
     return mip;
 }
 
-void DestructMIP(MIP *m) {
-    for(int i = 0; i < m->PointerCount; i++) {
-        if(m->Pointers[i])
-            break;
-
-        free(m->Pointers[i]);
-        m->Pointers[i] = NULL;
-    }
-}
-
 int main() {
     char *Test = (char *)malloc(15);
-    *Test = "Hello World!";
+    strcpy(Test, "Hello World!");
 
     MIP *mip = InitMIP(NULL);
 
     /* Since the library handles all memory, functions returning pointers can be passed directly using the NewPointer() function */
     /* Keep in mind: This is not good practice to use elsewhere unless you handle the memory wherever its being passed into ! */
-    int add_chk = AddMemory(mip, NewPointer(HEAP_MEMORY, Test));
+    int add_chk = AddMemory(mip, NewPointer(HEAP_MEMORY, Test, 15));
     if(!add_chk)
         printf("[ x ] Error, Unable to add to MIP's Memory Stack.....!");
 
-    LockToggle(m->Pointers[0]); // Lock the memory added above
+    LockToggle(mip->Pointers[0]); // Lock the memory added above
 
     /* Another Example Demostrating Memory Updating using MIP's function */
     
@@ -226,17 +234,20 @@ int main() {
     * Why use MIP to update rather than updating manually? Once modified and lock, it will be watched.
     * If it was handled manually, It can be injected into your buffer and will not be catched once updated to MIP
     * 
-    * PS: to keep a variable for read-only in-order to avoid indexing, Just do (char *BUFF = mip->Pointers[mip->PointerCount - 1]->Pointer; (only works for the last pointer added))
+    * PS: to keep a variable for read-only in-order to avoid indexing, Just do 
+    * (char *BUFF = mip->Pointers[mip->PointerCount - 1]->Pointer; (only works for the last pointer added))
     * this will keep updated even for new buffers
     */
     char *BUFF = (char *)malloc(1024);
-    AddMemory(mip, NewPointer(HEAP_MEMORY, BUFF)); // Update the current memory block and relock the memory
+    AddMemory(mip, NewPointer(HEAP_MEMORY, BUFF, 1024)); // Update the current memory block and relock the memory
 
     
-    UpdateMemory(mip->Pointers[1], strdup("NIGGER_BOB")); // Current pointer will be free'd for new pointer and relocks
-    RemoveMemory(mip->Pointers[1]);
+    UpdateMemory(mip->Pointers[1], strdup("NIGGER_BOB"), 0); // Current pointer will be free'd for new pointer and relocks
+    free(mip->Pointers[1]->Pointer); // Free the memory using the memory struct pointer to char pointer, or use the variable u created for this
+    RemoveMemory(mip, mip->Pointers[1]); // this will free the struct, not memory
 
     DestructMIP(mip);
+    free(Test);
 
     return 0;
 }
