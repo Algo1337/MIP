@@ -73,12 +73,12 @@ int LockToggle(Memory *mem) {
     }
 
     /* Lock memory */
+    mem->Locked = 1;
     if(mlock(aligned_ptr, aligned_size) != 0 || mprotect(aligned_ptr, mem->Memsz, PROT_READ) != 0) {
         (void)(((MIP *)mem->Base)->Debug ? printf("[ x ] Unable to lock memory....!\n") : 0);
         return 0;
     }
     
-    mem->Locked = 1;
     return mem->Locked;
 }
 
@@ -216,6 +216,7 @@ MIP *InitMIP(Memory **globals) {
 
 int main() {
     char *Test = (char *)malloc(15);
+    memset(Test, '\0', 15);
     strcpy(Test, "Hello World!");
 
     MIP *mip = InitMIP(NULL);
@@ -239,11 +240,16 @@ int main() {
     * this will keep updated even for new buffers
     */
     char *BUFF = (char *)malloc(1024);
+    if(!BUFF) {
+        printf("NO ... CRY\n");
+        return 0;
+    }
+
     AddMemory(mip, NewPointer(HEAP_MEMORY, BUFF, 1024)); // Update the current memory block and relock the memory
 
     
     UpdateMemory(mip->Pointers[1], strdup("NIGGER_BOB"), 0); // Current pointer will be free'd for new pointer and relocks
-    free(mip->Pointers[1]->Pointer); // Free the memory using the memory struct pointer to char pointer, or use the variable u created for this
+    // free(mip->Pointers[1]->Pointer); // Free the memory using the memory struct pointer to char pointer, or use the variable u created for this
     RemoveMemory(mip, mip->Pointers[1]); // this will free the struct, not memory
 
     DestructMIP(mip);
