@@ -16,6 +16,7 @@
 * To avoid locking other memory, fill buffers up with enough data for a memory page. 4096. Use CHAR_MAX_BUFF_SIZE
 *
 * Note that:
+* - MIP does not handle memory unless the memory block is being updated with UpdateMemory()!
 * - Even tho this is watching and comparing cached memory, app will only exit if memory has been modified.
 * - Using UpdateMemory will keep the pointer address changing which can be a plus in certain cases
 *
@@ -46,6 +47,8 @@ typedef struct MIP {
     long        PointerCount;
 
     int         Debug;
+
+    void        (*Destruc) (struct MIP *m);
 } MIP;
 
 int LockToggle(Memory *mem) { 
@@ -98,8 +101,10 @@ int UpdateMemory(Memory *mem, void *update, long new_sz) {
     if(mem->Pointer)
         free(mem->Pointer);
 
+    LockToggle(mem);
     mem->Pointer = update;
     mem->Copy = strdup(update);
+    LockToggle(mem);
     return 1;
 }
 
@@ -115,6 +120,28 @@ int AddMemory(MIP *m, Memory *new_mem) {
     m->PointerCount++;
     m->Pointers = (Memory **)realloc(m->Pointers, sizeof(Memory *) * (m->PointerCount + 1));
 
+    return 1;
+}
+
+int RemoveMemory(MIP *m, Memory *mem) {
+    if(!m || !mem)
+        return 0;
+
+    void **arr = (void **)malloc(sizeof(void *) * (m->PointerCount - 1));
+    memset(arr, '\0', sizeof(void *) * (m->PointerCount - 1));
+    long idx = 0;
+
+    for(int i = 0; i < m->PointerCount; i++) {
+        if(mem == m->Pointers[i]) {
+            free(m->Pointers[i]);
+            m->Pointers[i] = NULL;
+        }
+
+        arr[idx] = m->Pointers[i];
+        idx++;
+    }
+
+    m->PointerCount--;
     return 1;
 }
 
@@ -149,8 +176,9 @@ void WatchMemories(MIP *m) {
 MIP *InitMIP(Memory **globals) {
     MIP *mip = (MIP *)malloc(sizeof(MIP));
     *mip = (MIP){
-        Pointers = (Memory **)malloc(sizeof(Memory *)),
-        PointerCount = 0
+        .Pointers       = (Memory **)malloc(sizeof(Memory *)),
+        .PointerCount   = 0,
+        .Destruct       = DestructMIP
     };
 
     if(globals) {
@@ -168,6 +196,16 @@ MIP *InitMIP(Memory **globals) {
     return mip;
 }
 
+void DestructMIP(MIP *m) {
+    for(int i = 0; i < m->PointerCount; i++) {
+        if(m->Pointers[i])
+            break;
+
+        free(m->Pointers[i]);
+        m->Pointers[i] = NULL;
+    }
+}
+
 int main() {
     char *Test = (char *)malloc(15);
     *Test = "Hello World!";
@@ -180,6 +218,7 @@ int main() {
     if(!add_chk)
         printf("[ x ] Error, Unable to add to MIP's Memory Stack.....!");
 
+    LockToggle(m->Pointers[0]); // Lock the memory added above
 
     /* Another Example Demostrating Memory Updating using MIP's function */
     
@@ -187,17 +226,17 @@ int main() {
     * Why use MIP to update rather than updating manually? Once modified and lock, it will be watched.
     * If it was handled manually, It can be injected into your buffer and will not be catched once updated to MIP
     * 
-    * PS: to keep a variable for read-only in-order to avoid indexing, Just do (char *BUFF = mip->Pointers[i]->Pointer;)
+    * PS: to keep a variable for read-only in-order to avoid indexing, Just do (char *BUFF = mip->Pointers[mip->PointerCount - 1]->Pointer; (only works for the last pointer added))
     * this will keep updated even for new buffers
     */
     char *BUFF = (char *)malloc(1024);
-    AddMemory(mip, NewPointer(HEAP_MEMORY, BUFF));
-    LockToggle(mip->Pointers[0]); // Lock The Memory
+    AddMemory(mip, NewPointer(HEAP_MEMORY, BUFF)); // Update the current memory block and relock the memory
 
     
-    LockToggle(mip->Pointers[0]); // Unlock The Memory
-    UpdateMemory(mip->Pointers[0], strdup("NIGGER_BOB")); // Current pointer will be free'd for new pointer
-    LockToggle(mip->Pointers[0]); // Relock Memory
+    UpdateMemory(mip->Pointers[1], strdup("NIGGER_BOB")); // Current pointer will be free'd for new pointer and relocks
+    RemoveMemory(mip->Pointers[1]);
+
+    DestructMIP(mip);
 
     return 0;
 }
